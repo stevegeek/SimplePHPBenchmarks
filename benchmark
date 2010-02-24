@@ -1,0 +1,268 @@
+#!/usr/bin/php
+<?php
+
+// Benchmark PHP suite
+
+// ./benchmark                          : Run all tests
+// ./benchmark -r                       : Run all and generate report for all
+// ./benchmark -c=<name>                : Run tests in category 'name'
+// ./benchmark -c=<Cname> -t=<name>     : Run test 'name' in category 'Cname'
+// ./benchmark -r -c=<Cname> -t=<name>  : Generate report from previous results
+
+// -f, --force : force overwrite
+
+// All test categories appear as directories in ./Tests
+// test file ./tests/<Cname>/<name>/test.php
+// output to ./tests/<Cname>/<name>/results/<timestamp>.csv
+// report in ./tests/<Cname>/<name>/reports/<timestamp>.txt
+
+include "parseargs.php";
+
+function time_microtime()
+{
+    $mtime = explode(" ", microtime());
+    return $mtime[1] + $mtime[0];
+}
+
+function time_rusage()
+{
+    $ru = getrusage();
+    return $ru['ru_utime.tv_sec'] + ($ru['ru_utime.tv_usec'] / 1000000.0);
+}
+
+//////////////////////////////////////////////////
+$args = CommandLine::parseArgs($_SERVER['argv']);
+
+$force = false;
+$report = false;
+$_new = false;
+
+$_loops = 1000000;
+$test = false; // if false run all
+$category = false;
+$_gentestcount = 1;
+
+$_benchmarks = array();
+
+$timingfunc = time_rusage;
+
+//////////////////////////////////////////////////
+function doBenchmark($_category, $_test, $_force)
+{
+    global $_benchmarks;
+    global $_loops;
+    global $timingfunc;
+    echo "Benchmark '$_category/$_test'\n";
+
+    $timing = array();
+
+    $_path = "./tests/$_category/$_test/";
+
+    if (file_exists($_path."test.php"))
+    {
+        include $_path."test.php";
+
+        // write timing
+        if (!file_exists($_path."results"))
+            mkdir($_path."results");
+
+        $_f = fopen($_path."results/".time().".csv", 'w');
+        fputcsv($_f, $timing);
+        fclose($_f);
+
+        // report
+        if (!file_exists($_path."reports"))
+            mkdir($_path."reports");
+
+        $_report = "Time: ".strftime("%x %X")."\nCategory : $_category\nLoops : $_loops\nBenchmark : $_test\nName : Time (s)\n";
+
+        foreach ($_timing as $_testname => $_result)
+            $_report .= sprintf("%s : %.4f\n", $_testname, $_result);
+
+        file_put_contents($_path."reports/".time().".txt", $_report);
+
+        $_benchmarks[$_category][$_test] = array('report' => $_report, 'timing' => $_timing);
+        return true;
+    } else
+        return false;
+}
+
+foreach($args as $argname => $argval)
+{
+    if ($argname === 0)
+    {
+        $cmd = $argval;
+        break;
+    }
+    else if ($argname === 'h' || $argname === 'help')
+    {
+?>
+Usage:
+ ./benchmark                          : Run all tests
+ ./benchmark -r=<Rname>               : Run all and generate report for all
+ ./benchmark -c=<Cname>                : Run tests in category 'name'
+ ./benchmark -c=<Cname> -t=<name>     : Run test 'name' in category 'Cname'
+
+Options:
+ -f, --force : force overwrite
+ -l, --loops : number of iterations for each test
+ -m, --microtime  : Microtime mode instead of rusage
+ -n, --new : Create new empty test with category <CName> and name <name>
+ -g, --generate : Number of tests to add to new test
+
+ EG.
+ ./benchmark -r -f -m -l=100000 -c=FunctionCall : Do 100000 loops of all tests in
+                                                  FunctionCall category with microtime
+                                                  and force overwrite of report
+<?php
+    }
+    else if ($argname === 'm' || $argname === 'microtime')
+    {
+        $timingfunc = time_microtime;
+        echo "Use Microtime instead of rusage\n";
+    }
+    else if ($argname === 'l' || $argname === 'loops')
+    {
+        $_loops = intval($argval);
+        echo "Force write on\n";
+    }
+    else if ($argname === 'f' || $argname === 'force')
+    {
+        $force = true;
+        echo "Force write on\n";
+    }
+    else if ($argname === 'r' || $argname === 'report')
+    {
+        $report = $argval;
+        echo "Report generation on\n";
+    }
+    else if ($argname === 't' || $argname === 'test')
+    {
+        $test = $argval;
+        echo "'$test' benchmark\n";
+    }
+    else if ($argname === 'c' || $argname === 'category')
+    {
+        $category = $argval;
+        echo "'$category' category\n";
+    }
+    else if ($argname === 'n' || $argname === 'new')
+    {
+        $_new = true;
+    }
+    else if ($argname === 'g' || $argname === 'generate')
+    {
+        $_gentestcount = intval($argval);
+    }
+}
+
+if ($_new)
+{
+    if ($category === false || $test === false)
+    {
+        echo "Please specify a category and test name\n";
+        return;
+    }
+    echo "Making new test: $category/$test\n";
+
+    if (!file_exists("./tests/$category"))
+        mkdir("./tests/$category");
+
+    if (!file_exists("./tests/$category/$test"))
+        mkdir("./tests/$category/$test");
+
+    $gensource = "";
+    for($i = 0; $i < $_gentestcount; $i++)
+        $gensource .= "
+
+// *** Test ***
+\$_name = 'UNIQUETESTNAME';
+echo \"Do '\$_name'...\\n\";
+flush();
+
+// your variables
+
+\$_start = \$timingfunc();
+for (\$i = 0; \$i < \$_loops; \$i++)
+{
+    // your code
+
+}
+\$_timing[\$_name] = \$timingfunc() - \$_start;
+// *** End Test ***";
+
+    file_put_contents("./tests/$category/$test/test.php", "<?php\n".$gensource);
+    return;
+}
+
+if ($category !== false)
+{
+    if ($test === false)
+    {
+        // run all in cat
+        foreach (new DirectoryIterator('tests/'.$category) as $fileInfo)
+        {
+            if ($fileInfo->isDir() && !$fileInfo->isDot())
+            {
+                $test = $fileInfo->getFilename();
+                $_benchmarks[$category][$test] = true;
+            }
+        }
+    }
+    else
+    {
+        // specific test
+        $_benchmarks[$category][$test] = true;
+    }
+}
+else
+{
+    // run all
+    foreach (new DirectoryIterator('tests') as $catInfo)
+    {
+        if ($catInfo->isDir() && !$catInfo->isDot())
+        {
+            $category = $catInfo->getFilename();
+            foreach (new DirectoryIterator('tests/'.$category) as $fileInfo)
+            {
+                if ($fileInfo->isDir() && !$fileInfo->isDot())
+                {
+                    $test = $fileInfo->getFilename();
+                    $_benchmarks[$category][$test] = true;
+                }
+            }
+        }
+    }
+}
+
+foreach($_benchmarks as $category => $cat)
+{
+    echo "Category '$category'\n";
+    foreach($cat as $test => $t)
+    {
+         if (!doBenchmark($category, $test, $force))
+            echo "ERROR: something went wrong for '$catName', '$testName'\n";
+    }
+}
+
+// GENERATE FINAL REPORT
+if ($report !== false)
+{
+    echo "Saving all results to: $report\n";
+
+    if ((file_exists($report) && $force) || !file_exists($report))
+    {
+        $finalreport = "";
+        foreach($_benchmarks as $catName => $cat)
+        {
+            foreach($cat as $testName => $timing)
+            {
+                $finalreport .= $_benchmarks[$catName][$testName]['report']."\n----\n\n";
+            }
+        }
+
+        file_put_contents($report, $finalreport);
+    } else
+        echo "Enable force to overwrite report\n";
+}
+
