@@ -16,8 +16,6 @@
 // output to ./tests/<Cname>/<name>/results/<timestamp>.csv
 // report in ./tests/<Cname>/<name>/reports/<timestamp>.txt
 
-include "parseargs.php";
-
 function time_microtime()
 {
     $mtime = explode(" ", microtime());
@@ -31,7 +29,7 @@ function time_rusage()
 }
 
 //////////////////////////////////////////////////
-$args = CommandLine::parseArgs($_SERVER['argv']);
+$args = getopt("nmfr:c:t:g:l:", array("new","microtime","force","report:", "category:", "test:","generate:", "loops:"));
 
 $force = false;
 $report = false;
@@ -77,7 +75,10 @@ function doBenchmark($_category, $_test, $_force)
         $_report = "Time: ".strftime("%x %X")."\nCategory : $_category\nLoops : $_loops\nBenchmark : $_test\nName : Time (s)\n";
 
         foreach ($_timing as $_testname => $_result)
+        {
+            printf("%s : %.4f\n", $_testname, $_result);
             $_report .= sprintf("%s : %.4f\n", $_testname, $_result);
+        }
 
         file_put_contents($_path."reports/".time().".txt", $_report);
 
@@ -99,9 +100,9 @@ foreach($args as $argname => $argval)
 ?>
 Usage:
  ./benchmark                          : Run all tests
- ./benchmark -r=<Rname>               : Run all and generate report for all
- ./benchmark -c=<Cname>                : Run tests in category 'name'
- ./benchmark -c=<Cname> -t=<name>     : Run test 'name' in category 'Cname'
+ ./benchmark -r <Rname>               : Run all and generate report for all
+ ./benchmark -c <Cname>                : Run tests in category 'name'
+ ./benchmark -c <Cname> -t <name>     : Run test 'name' in category 'Cname'
 
 Options:
  -f, --force : force overwrite
@@ -111,7 +112,7 @@ Options:
  -g, --generate : Number of tests to add to new test
 
  EG.
- ./benchmark -r -f -m -l=100000 -c=FunctionCall : Do 100000 loops of all tests in
+ ./benchmark -r -f -m -l 100000 -c FunctionCall : Do 100000 loops of all tests in
                                                   FunctionCall category with microtime
                                                   and force overwrite of report
 <?php
